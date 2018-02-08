@@ -68,11 +68,11 @@ func (p *producer) Close() error {
 
 func (p *producer) emitMetrics() {
 	start := time.Now()
-	m := make(map[stat]int)
+	m := make(map[string]int)
 	for {
 		select {
 		case s := <-p.stats:
-			m[s] += 1
+			m[s.topic] += 1
 		case <-time.After(5000 * time.Millisecond):
 			now := time.Now()
 			delta := now.Sub(start)
@@ -83,7 +83,7 @@ func (p *producer) emitMetrics() {
 			}
 			log.Printf("Stats: %v", string(bytes))
 			p.asyncProducer.Input() <- &sarama.ProducerMessage{Value: sarama.ByteEncoder(bytes), Topic: "metrics"}
-			m = make(map[stat]int)
+			m = make(map[string]int)
 			start = now
 		}
 	}
