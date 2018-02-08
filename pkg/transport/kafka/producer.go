@@ -1,10 +1,11 @@
-
 package kafka
 
 import (
 	"github.com/Shopify/sarama"
 	"log"
 	"github.com/projectriff/message-transport/pkg/message"
+	"time"
+	"encoding/json"
 )
 
 func NewProducer(brokerAddrs []string) (*producer, error) {
@@ -20,15 +21,24 @@ func NewProducer(brokerAddrs []string) (*producer, error) {
 		}
 	}(asyncProducer.Errors())
 
-	return &producer{
+	p := producer{
 		asyncProducer: asyncProducer,
-		errors: errors,
-	}, nil
+		errors:        errors,
+		stats:         make(chan stat, 100),
+	}
+	go p.emitMetrics()
+	return &p, nil
 }
 
 type producer struct {
 	asyncProducer sarama.AsyncProducer
 	errors        chan error
+
+	stats chan stat
+}
+
+type stat struct {
+	topic string
 }
 
 func (p *producer) Send(topic string, message message.Message) error {
@@ -39,10 +49,10 @@ func (p *producer) Send(topic string, message message.Message) error {
 	kafkaMsg.Topic = topic
 
 	p.asyncProducer.Input() <- kafkaMsg
+	p.stats <- stat{topic: topic}
 
 	return nil
 }
-
 
 func (p *producer) Errors() <-chan error {
 	return p.errors
@@ -56,3 +66,20 @@ func (p *producer) Close() error {
 	return err
 }
 
+func (p *producer) emitMetrics() {
+	start := time.Now()
+	m := make(map[stat]int)
+	for {
+		select {
+		case s := <-p.stats:
+			m[s] += 1
+		case <-time.After(100 * time.Millisecond):
+			delta := time.Now().Sub(start)
+			data := map[string]interface{} {"elapsed":delta, "stats": m}
+			bytes, _ := json.Marshal(data)
+			log.Printf("Stats: %v", string(bytes))
+			p.asyncProducer.Input() <- &sarama.ProducerMessage{Value: sarama.ByteEncoder(bytes), Topic: "metrics"}
+			m = make(map[stat]int)
+		}
+	}
+}
