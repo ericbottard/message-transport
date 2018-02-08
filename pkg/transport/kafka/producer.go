@@ -73,13 +73,18 @@ func (p *producer) emitMetrics() {
 		select {
 		case s := <-p.stats:
 			m[s] += 1
-		case <-time.After(100 * time.Millisecond):
-			delta := time.Now().Sub(start)
+		case <-time.After(5000 * time.Millisecond):
+			now := time.Now()
+			delta := now.Sub(start)
 			data := map[string]interface{} {"elapsed":delta, "stats": m}
-			bytes, _ := json.Marshal(data)
+			bytes, err := json.Marshal(data)
+			if err != nil {
+				log.Printf("Error %v", err)
+			}
 			log.Printf("Stats: %v", string(bytes))
 			p.asyncProducer.Input() <- &sarama.ProducerMessage{Value: sarama.ByteEncoder(bytes), Topic: "metrics"}
 			m = make(map[stat]int)
+			start = now
 		}
 	}
 }
